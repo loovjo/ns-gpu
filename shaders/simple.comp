@@ -5,7 +5,13 @@ layout(set=0, binding=0) buffer ImageStuff {
     float[] pixels;
 };
 
+uint WIDTH = 400;
+
 void main() {
-    uint x = gl_GlobalInvocationID.x;
-    pixels[x] *= 20.;
+    uint i = gl_GlobalInvocationID.x;
+
+    uint x = i % WIDTH;
+    uint y = i / WIDTH;
+
+    pixels[i] = float(x) / float(WIDTH);
 }

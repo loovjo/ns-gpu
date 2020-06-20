@@ -2,11 +2,58 @@ use std::io::Cursor;
 
 use wgpu::{
     Adapter, Device,
+    Buffer,
 };
 
 use futures::executor::block_on;
 
 const COMP_SHADER_1: &[u8] = include_bytes!("../compiled-shaders/simple-comp.spv");
+
+type Float = f32;
+const WIDTH: usize = 400;
+const HEIGHT: usize = 500;
+
+const DX: f32 = 1. / 400.;
+
+const BUFFER_SIZE: u64 = (WIDTH * HEIGHT * std::mem::size_of::<Float>() / std::mem::size_of::<u8>()) as u64;
+
+async fn allocate_scalarfield(device: &Device) -> Result<Buffer, String> {
+    let cont = [0 as Float; WIDTH * HEIGHT];
+
+    let byte_buf = bytemuck::cast_slice::<Float, u8>(&cont);
+
+    assert_eq!(byte_buf.len(), BUFFER_SIZE as usize);
+
+    let buf = device.create_buffer_with_data(
+        byte_buf,
+        wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::STORAGE // what is a storage?
+    );
+
+    Ok(buf)
+}
+
+async fn create_compute_shader(device: &wgpu::Device, spirv: &[u8], bind_group_layouts: &[&wgpu::BindGroupLayout]) -> Result<(wgpu::ShaderModule, wgpu::ComputePipeline), String> {
+    let comp_shader_spirv = wgpu::read_spirv(Cursor::new(spirv)).map_err(|e| e.to_string())?;
+    let comp_mod = device.create_shader_module(&comp_shader_spirv);
+
+    let comp_layout = device.create_pipeline_layout(
+        &wgpu::PipelineLayoutDescriptor {
+            bind_group_layouts,
+        },
+    );
+
+    let compute_pipeline = device.create_compute_pipeline(
+        &wgpu::ComputePipelineDescriptor {
+            layout: &comp_layout,
+            compute_stage: wgpu::ProgrammableStageDescriptor {
+                module: &comp_mod,
+                entry_point: "main",
+            },
+        }
+    );
+
+    Ok((comp_mod, compute_pipeline))
+}
 
 async fn run() -> Result<(), String> {
     let adapter = Adapter::request(
@@ -21,28 +68,42 @@ async fn run() -> Result<(), String> {
 
     let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor::default()).await;
 
-    // Make buffer
+    let pressure = allocate_scalarfield(&device).await?;
+    let vel_x = allocate_scalarfield(&device).await?;
+    let vel_y = allocate_scalarfield(&device).await?;
 
-    let buffer_conts = (0..65536).map(|x| x as f32).collect::<Vec<_>>();
-
-    let byte_buf = bytemuck::cast_slice::<f32, u8>(&buffer_conts);
-
-    let buf = device.create_buffer_with_data(
-        byte_buf,
-        wgpu::BufferUsage::MAP_READ | wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::STORAGE // what is a storage?
-    );
+    let tmp_pressure_poisson_rhs = allocate_scalarfield(&device).await?;
 
     // Load compute shader
 
-    let comp_shader_spirv = wgpu::read_spirv(Cursor::new(COMP_SHADER_1)).map_err(|e| e.to_string())?;
-    let comp_mod = device.create_shader_module(&comp_shader_spirv);
 
     let bind_group_layout = device.create_bind_group_layout(
         &wgpu::BindGroupLayoutDescriptor {
             label: None,
             bindings: &[
-                wgpu::BindGroupLayoutEntry {
+                wgpu::BindGroupLayoutEntry { // Pressure
                     binding: 0,
+                    visibility: wgpu::ShaderStage::COMPUTE,
+                    ty: wgpu::BindingType::UniformBuffer {
+                        dynamic: false,
+                    },
+                },
+                wgpu::BindGroupLayoutEntry { // Temporary pression poisson RHS
+                    binding: 1,
+                    visibility: wgpu::ShaderStage::COMPUTE,
+                    ty: wgpu::BindingType::UniformBuffer {
+                        dynamic: false,
+                    },
+                },
+                wgpu::BindGroupLayoutEntry { // vx
+                    binding: 2,
+                    visibility: wgpu::ShaderStage::COMPUTE,
+                    ty: wgpu::BindingType::UniformBuffer {
+                        dynamic: false,
+                    },
+                },
+                wgpu::BindGroupLayoutEntry { // vy
+                    binding: 3,
                     visibility: wgpu::ShaderStage::COMPUTE,
                     ty: wgpu::BindingType::UniformBuffer {
                         dynamic: false,
@@ -52,6 +113,8 @@ async fn run() -> Result<(), String> {
         },
     );
 
+    let (_comp_mod, compute_pipeline) = create_compute_shader(&device, COMP_SHADER_1, &[&bind_group_layout]).await?;
+
     let bind_group = device.create_bind_group(
         &wgpu::BindGroupDescriptor {
             label: None,
@@ -60,30 +123,33 @@ async fn run() -> Result<(), String> {
                 wgpu::Binding {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer {
-                        buffer: &buf,
-                        range: 0..byte_buf.len() as u64,
+                        buffer: &pressure,
+                        range: 0..BUFFER_SIZE,
+                    },
+                },
+                wgpu::Binding {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer {
+                        buffer: &tmp_pressure_poisson_rhs,
+                        range: 0..BUFFER_SIZE,
+                    },
+                },
+                wgpu::Binding {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer {
+                        buffer: &vel_x,
+                        range: 0..BUFFER_SIZE,
+                    },
+                },
+                wgpu::Binding {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Buffer {
+                        buffer: &vel_y,
+                        range: 0..BUFFER_SIZE,
                     },
                 },
             ],
         },
-    );
-
-    let comp_layout = device.create_pipeline_layout(
-        &wgpu::PipelineLayoutDescriptor {
-            bind_group_layouts: &[
-                &bind_group_layout,
-            ],
-        },
-    );
-
-    let compute_pipeline = device.create_compute_pipeline(
-        &wgpu::ComputePipelineDescriptor {
-            layout: &comp_layout,
-            compute_stage: wgpu::ProgrammableStageDescriptor {
-                module: &comp_mod,
-                entry_point: "main",
-            },
-        }
     );
 
     // Dispatch!
@@ -103,7 +169,7 @@ async fn run() -> Result<(), String> {
             &[],
         );
 
-        pass.dispatch(65536 / 64, 1, 1);
+        pass.dispatch((WIDTH * HEIGHT / 64) as u32, 1, 1);
     }
 
     let cmd_buf = encoder.finish();
@@ -114,7 +180,7 @@ async fn run() -> Result<(), String> {
 
     // Read buffer
 
-    let mapped_fut = buf.map_read(0, byte_buf.len() as u64);
+    let mapped_fut = pressure.map_read(0, BUFFER_SIZE);
     device.poll(wgpu::Maintain::Wait);
     let mapped_mem = mapped_fut.await.map_err(|_| "mapping failed")?;
     let conts = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
