@@ -5,6 +5,8 @@ use wgpu::{
     Buffer,
 };
 
+use image::ImageEncoder;
+
 use futures::executor::block_on;
 
 const COMP_SHADER_1: &[u8] = include_bytes!("../compiled-shaders/simple-comp.spv");
@@ -53,6 +55,39 @@ async fn create_compute_shader(device: &wgpu::Device, spirv: &[u8], bind_group_l
     );
 
     Ok((comp_mod, compute_pipeline))
+}
+
+async fn write_image(
+    device: &wgpu::Device,
+    (r, g, b): (Option<&wgpu::Buffer>, Option<&wgpu::Buffer>, Option<&wgpu::Buffer>),
+    name: &str
+) -> Result<(), String> {
+    let rgba_buffer: &mut [u8] = &mut [255; WIDTH * HEIGHT * 4]; // Default to white
+
+    for (i, col_buf) in vec![r, g, b].into_iter().enumerate() {
+        let col_buf = if let Some(col_buf) = col_buf {
+            col_buf
+        } else {
+            continue;
+        };
+
+        let mapped_fut = col_buf.map_read(0, BUFFER_SIZE);
+        device.poll(wgpu::Maintain::Wait);
+        let mapped_mem = mapped_fut.await.map_err(|_| "mapping failed")?;
+        let color_data = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
+
+        for j in 0..WIDTH * HEIGHT {
+            let datum_mapped = (color_data[j] + 1.) * 128.;
+            rgba_buffer[j * 4 + i] = datum_mapped.min(255.).max(0.) as u8;
+        }
+    }
+
+    let path = format!("image-dumps/{}.png", name);
+
+    let enc = image::png::PNGEncoder::new(std::fs::File::create(path).map_err(|e| format!("File error: {:?}", e))?);
+
+    enc.write_image(rgba_buffer, WIDTH as u32, HEIGHT as u32, image::ColorType::Rgba8).map_err(|e| format!("Writing image failed: {:?}", e))?;
+    Ok(())
 }
 
 async fn run() -> Result<(), String> {
@@ -186,6 +221,14 @@ async fn run() -> Result<(), String> {
     let conts = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
 
     println!("Got back {:?}", &conts[..12]);
+
+    std::mem::drop(mapped_mem);
+
+    write_image(
+        &device,
+        (Some(&pressure), None, None),
+        "pressure",
+    ).await?;
 
     Ok(())
 }
