@@ -1,5 +1,18 @@
 #version 450
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 50, local_size_y = 1, local_size_z = 1) in;
+
+#define DECLARE(name, expr) float name(int x, int y) { return expr; }
+
+#define DF_DX(fn, x, y) ((fn((x) + 1, (y)) - fn((x) - 1, (y))) / (2 * dx))
+#define DF_DY(fn, x, y) ((fn((x), (y) + 1) - fn((x), (y) - 1)) / (2 * dy))
+
+#define NABLA_VECTORFIELD(fnx, fny, x, y) DF_DX(fnx, x, y) + DF_DY(fny, x, y)
+
+#define XNABLA_SCALARFIELD(fn, x, y) DF_DX(fn, x, y)
+#define YNABLA_SCALARFIELD(fn, x, y) DF_DY(fn, x, y)
+
+#define XNABLA_TRIPLET(fnx, fny, x, y) fnx(x, y) * DF_DX(fnx, x, y) + fny(x, y) * DF_DY(fnx, x, y)
+#define YNABLA_TRIPLET(fnx, fny, x, y) fnx(x, y) * DF_DX(fny, x, y) + fny(x, y) * DF_DY(fny, x, y)
 
 layout(set=0, binding=0) buffer Pressure {
     float[] pressure;
@@ -10,30 +23,52 @@ layout(set=0, binding=1) buffer PressurePoissonRHS {
 };
 
 layout(set=0, binding=2) buffer VelocityX {
-    float[] vx;
+    float[] vx_arr;
 };
 
 layout(set=0, binding=3) buffer VelocityY {
-    float[] vy;
+    float[] vy_arr;
 };
 
-uint WIDTH = 400;
+uint WIDTH = 100;
+uint HEIGHT = 100;
 float dx = 0.01;
 float dy = 0.01;
-float dt = 0.005;
+float dt = 0.0005;
 
+float rho = 1.0;
+float nu = 0.1;
 
-float read_image(float[] buffer, uint x, uint y) {
-    return buffer[x + WIDTH * y];
+float vx(int x, int y) {
+    uint rx = (x + WIDTH) % WIDTH;
+    uint ry = (y + HEIGHT) % HEIGHT;
+    return vx_arr[rx + WIDTH * ry];
 }
+
+float vy(int x, int y) {
+    uint rx = (x + WIDTH) % WIDTH;
+    uint ry = (y + HEIGHT) % HEIGHT;
+    return vy_arr[rx + WIDTH * ry];
+}
+
+DECLARE(p1, NABLA_VECTORFIELD(vx, vy, x, y) / dt)
+
+DECLARE(p2_nx, XNABLA_TRIPLET(vx, vy, x, y))
+DECLARE(p2_ny, YNABLA_TRIPLET(vx, vy, x, y))
+DECLARE(p2, NABLA_VECTORFIELD(p2_nx, p2_ny, x, y))
+
+DECLARE(p3_n1, NABLA_VECTORFIELD(vx, vy, x, y))
+DECLARE(p3_n2x, XNABLA_SCALARFIELD(p3_n1, x, y))
+DECLARE(p3_n2y, YNABLA_SCALARFIELD(p3_n1, x, y))
+DECLARE(p3, nu * NABLA_VECTORFIELD(p3_n2x, p3_n2y, x, y))
+
+DECLARE(result, rho * (p1(x, y) - p2(x, y) + p3(x, y)))
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
 
-    uint x = i % WIDTH;
-    uint y = i / WIDTH;
+    int x = int(i % WIDTH);
+    int y = int(i / WIDTH);
 
-
-
-    pressure[i] = float(x) / float(WIDTH);
+    pressure_possion_rhs[i] = p3(x,y) / 100; //result(x, y);
 }

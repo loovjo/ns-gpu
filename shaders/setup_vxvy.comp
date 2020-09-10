@@ -1,0 +1,30 @@
+#version 450
+layout(local_size_x = 50, local_size_y = 1, local_size_z = 1) in;
+
+layout(set=0, binding=2) buffer VelocityX {
+    float[] vx_arr;
+};
+
+layout(set=0, binding=3) buffer VelocityY {
+    float[] vy_arr;
+};
+
+
+uint WIDTH = 100;
+float dx = 0.01;
+float dy = 0.01;
+
+#define PI 3.1415926538
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+
+    uint x = i % WIDTH;
+    uint y = i / WIDTH;
+
+    float fx = dx * x;
+    float fy = dy * y;
+
+    vx_arr[i] = cos(3 * 2 * PI * fy) + 3 * sin(2 * PI * fx);
+    vy_arr[i] = 2 * sin(2 * PI * fy) + 0.3 * cos(2 * 2 * PI * fx);
+}

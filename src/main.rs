@@ -9,13 +9,12 @@ use image::ImageEncoder;
 
 use futures::executor::block_on;
 
-const COMP_SHADER_1: &[u8] = include_bytes!("../compiled-shaders/simple-comp.spv");
+const SHADER_POSSION_RHS: &[u8] = include_bytes!("../compiled-shaders/pressure_poisson_rhs-comp.spv");
+const SHADER_SETUP_V: &[u8] = include_bytes!("../compiled-shaders/setup_vxvy-comp.spv");
 
 type Float = f32;
-const WIDTH: usize = 400;
-const HEIGHT: usize = 500;
-
-const DX: f32 = 1. / 400.;
+const WIDTH: usize = 100;
+const HEIGHT: usize = 100;
 
 const BUFFER_SIZE: u64 = (WIDTH * HEIGHT * std::mem::size_of::<Float>() / std::mem::size_of::<u8>()) as u64;
 
@@ -148,8 +147,6 @@ async fn run() -> Result<(), String> {
         },
     );
 
-    let (_comp_mod, compute_pipeline) = create_compute_shader(&device, COMP_SHADER_1, &[&bind_group_layout]).await?;
-
     let bind_group = device.create_bind_group(
         &wgpu::BindGroupDescriptor {
             label: None,
@@ -187,6 +184,9 @@ async fn run() -> Result<(), String> {
         },
     );
 
+    let (_comp_mod, setup_compute_pipeline) = create_compute_shader(&device, SHADER_SETUP_V, &[&bind_group_layout]).await?;
+    let (_comp_mod, possion_compute_pipeline) = create_compute_shader(&device, SHADER_POSSION_RHS, &[&bind_group_layout]).await?;
+
     // Dispatch!
 
     let mut encoder = device.create_command_encoder(
@@ -197,14 +197,26 @@ async fn run() -> Result<(), String> {
 
     {
         let mut pass = encoder.begin_compute_pass();
-        pass.set_pipeline(&compute_pipeline);
+        pass.set_pipeline(&setup_compute_pipeline);
         pass.set_bind_group(
             0,
             &bind_group,
             &[],
         );
 
-        pass.dispatch((WIDTH * HEIGHT / 64) as u32, 1, 1);
+        pass.dispatch((WIDTH * HEIGHT / 50) as u32, 1, 1);
+    }
+
+    {
+        let mut pass = encoder.begin_compute_pass();
+        pass.set_pipeline(&possion_compute_pipeline);
+        pass.set_bind_group(
+            0,
+            &bind_group,
+            &[],
+        );
+
+        pass.dispatch((WIDTH * HEIGHT / 50) as u32, 1, 1);
     }
 
     let cmd_buf = encoder.finish();
@@ -215,19 +227,45 @@ async fn run() -> Result<(), String> {
 
     // Read buffer
 
-    let mapped_fut = pressure.map_read(0, BUFFER_SIZE);
-    device.poll(wgpu::Maintain::Wait);
-    let mapped_mem = mapped_fut.await.map_err(|_| "mapping failed")?;
-    let conts = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
+    {
+        let mapped_fut = vel_x.map_read(0, BUFFER_SIZE);
+        device.poll(wgpu::Maintain::Wait);
+        let mapped_mem = mapped_fut.await.map_err(|_| "mapping failed")?;
+        let conts = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
 
-    println!("Got back {:?}", &conts[..12]);
+        println!("vx = {:?} ... {:?}", &conts[..12], &conts[conts.len() - 12..]);
+    }
 
-    std::mem::drop(mapped_mem);
+    {
+        let mapped_fut = vel_y.map_read(0, BUFFER_SIZE);
+        device.poll(wgpu::Maintain::Wait);
+        let mapped_mem = mapped_fut.await.map_err(|_| "mapping failed")?;
+        let conts = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
+
+        println!("vy = {:?} ... {:?}", &conts[..12], &conts[conts.len() - 12..]);
+    }
+
+    {
+        let mapped_fut = tmp_pressure_poisson_rhs.map_read(0, BUFFER_SIZE);
+        device.poll(wgpu::Maintain::Wait);
+        let mapped_mem = mapped_fut.await.map_err(|_| "mapping failed")?;
+        let conts = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
+
+        println!("rhs = {:?} ... {:?}", &conts[..12], &conts[conts.len() - 12..]);
+    }
+
 
     write_image(
         &device,
-        (Some(&pressure), None, None),
-        "pressure",
+        (Some(&vel_x), Some(&vel_y), None),
+        "velocity",
+    ).await?;
+
+
+    write_image(
+        &device,
+        (Some(&tmp_pressure_poisson_rhs), None, None),
+        "tmp_pressure_poisson_rhs",
     ).await?;
 
     Ok(())
