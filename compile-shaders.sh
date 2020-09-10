@@ -16,5 +16,9 @@ do
     out="$BUILD_DIR/$basename-$format.spv"
     echo "== Compiling $GREEN${file}$RESET to $GREEN${out}$RESET =="
     glslc $file -o $out
-    if [ $? -ne 0 ] ; then exit 1; fi
+    if [ $? -ne 0 ]
+    then
+        echo "Encountered one error, stopping"
+        exit 1
+    fi
 done
