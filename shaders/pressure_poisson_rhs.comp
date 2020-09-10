@@ -33,5 +33,5 @@ void main() {
     int x = int(i % WIDTH);
     int y = int(i / WIDTH);
 
-    pressure_possion_rhs[i] = p3(x,y) / 100; //result(x, y);
+    pressure_possion_rhs[i] = result(x, y);
 }
