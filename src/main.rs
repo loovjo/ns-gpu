@@ -231,7 +231,7 @@ async fn run() -> Result<(), String> {
     queue.submit(&[cmd_buf]);
     println!("Done");
 
-    for frame in 0..1000i32 {
+    for frame in 0..375i32 {
         println!("Doing frame {:?}", frame);
 
         let mut encoder = device.create_command_encoder(
@@ -293,7 +293,7 @@ async fn run() -> Result<(), String> {
         // println!("\npossion rhs:");
         // read_buffer(&device, &tmp_pressure_poisson_rhs).await?;
 
-        if frame % 25 == 0 {
+        if frame % 3 == 0 {
             write_image(
                 &device,
                 (Some(&vel_x), Some(&vel_y), Some(&pressure)),
