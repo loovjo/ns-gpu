@@ -33,7 +33,7 @@ uint WIDTH  = 500;
 uint HEIGHT = 500;
 float dx = 0.01;
 float dy = 0.01;
-float dt = 0.0005;
+float dt = 0.001;
 
 float rho = 1.0;
 float nu = 0.1;
