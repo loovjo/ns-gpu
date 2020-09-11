@@ -1,4 +1,4 @@
 /target
 compiled-shaders
 Cargo.lock
-image-dumps
+image-dumps/*.png
