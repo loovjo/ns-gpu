@@ -1,3 +1,5 @@
+rm image-dumps/*.png
+
 ./compile-shaders.sh && cargo run
 if [ $? -eq 0 ]
 then
