@@ -3,7 +3,7 @@
 #include"prelude.comp"
 
 
-#define PI 3.1415926538
+#define TAU (2*3.1415926538)
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
@@ -14,6 +14,10 @@ void main() {
     float fx = dx * x;
     float fy = dy * y;
 
-    vx_arr[i] = cos(3 * 2 * PI * fy) + 3 * sin(2 * PI * fx);
-    vy_arr[i] = 2 * sin(2 * PI * fy) + 0.3 * cos(2 * 2 * PI * fx);
+    // vx_arr[i] = sin(fx * TAU) + cos(2 * fy * TAU);
+    // vy_arr[i] = 2 * cos(fx * TAU) + cos(3 * fy * TAU);
+    if (1.5 < fx && fx < 3.5 && 1.5 < fy && fy < 3.5) {
+        vx_arr[i] = -(fx - 2.5);
+        vy_arr[i] = -(fy - 2.5);
+    }
 }

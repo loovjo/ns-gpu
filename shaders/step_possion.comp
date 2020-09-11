@@ -1,0 +1,18 @@
+#version 450
+
+#include"prelude.comp"
+
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+
+    int x = int(i % WIDTH);
+    int y = int(i / WIDTH);
+
+    float x_part = dy * dy * (p(x + 1, y) + p(x - 1, y));
+    float y_part = dx * dx * (p(x, y + 1) + p(x, y - 1));
+    float f_part = dx * dx * dy * dy * p_rhs(x, y);
+
+    float new_p = (x_part + y_part - f_part) / (2 * (dx * dx + dy * dy));
+    pressure[i] = new_p;
+}

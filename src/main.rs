@@ -11,10 +11,13 @@ use futures::executor::block_on;
 
 const SHADER_POSSION_RHS: &[u8] = include_bytes!("../compiled-shaders/pressure_poisson_rhs-comp.spv");
 const SHADER_SETUP_V: &[u8] = include_bytes!("../compiled-shaders/setup_vxvy-comp.spv");
+const SHADER_STEP_POSSION: &[u8] = include_bytes!("../compiled-shaders/step_possion-comp.spv");
+const SHADER_V: &[u8] = include_bytes!("../compiled-shaders/v-comp.spv");
 
 type Float = f32;
-const WIDTH: usize = 100;
-const HEIGHT: usize = 100;
+const WIDTH: usize = 500;
+const HEIGHT: usize = 500;
+const DISPATCH_SIZE: usize = 50;
 
 const BUFFER_SIZE: u64 = (WIDTH * HEIGHT * std::mem::size_of::<Float>() / std::mem::size_of::<u8>()) as u64;
 
@@ -86,6 +89,21 @@ async fn write_image(
     let enc = image::png::PNGEncoder::new(std::fs::File::create(path).map_err(|e| format!("File error: {:?}", e))?);
 
     enc.write_image(rgba_buffer, WIDTH as u32, HEIGHT as u32, image::ColorType::Rgba8).map_err(|e| format!("Writing image failed: {:?}", e))?;
+    Ok(())
+}
+
+async fn read_buffer(device: &wgpu::Device, buf: &wgpu::Buffer) -> Result<(), String> {
+    let mapped_fut = buf.map_read(0, BUFFER_SIZE);
+    device.poll(wgpu::Maintain::Wait);
+    let mapped_mem = mapped_fut.await.map_err(|_| "mapping failed")?;
+    let conts = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
+
+    for row in 0..HEIGHT {
+        for col in 0..HEIGHT {
+            print!("  {:.7}", conts[col + row * WIDTH]);
+        }
+        println!();
+    }
     Ok(())
 }
 
@@ -186,6 +204,8 @@ async fn run() -> Result<(), String> {
 
     let (_comp_mod, setup_compute_pipeline) = create_compute_shader(&device, SHADER_SETUP_V, &[&bind_group_layout]).await?;
     let (_comp_mod, possion_compute_pipeline) = create_compute_shader(&device, SHADER_POSSION_RHS, &[&bind_group_layout]).await?;
+    let (_comp_mod, step_possion_pipeline) = create_compute_shader(&device, SHADER_STEP_POSSION, &[&bind_group_layout]).await?;
+    let (_comp_mod, v_pipeline) = create_compute_shader(&device, SHADER_V, &[&bind_group_layout]).await?;
 
     // Dispatch!
 
@@ -194,7 +214,6 @@ async fn run() -> Result<(), String> {
             label: None,
         }
     );
-
     {
         let mut pass = encoder.begin_compute_pass();
         pass.set_pipeline(&setup_compute_pipeline);
@@ -204,69 +223,86 @@ async fn run() -> Result<(), String> {
             &[],
         );
 
-        pass.dispatch((WIDTH * HEIGHT / 50) as u32, 1, 1);
+        pass.dispatch((WIDTH * HEIGHT / DISPATCH_SIZE) as u32, 1, 1);
     }
-
-    {
-        let mut pass = encoder.begin_compute_pass();
-        pass.set_pipeline(&possion_compute_pipeline);
-        pass.set_bind_group(
-            0,
-            &bind_group,
-            &[],
-        );
-
-        pass.dispatch((WIDTH * HEIGHT / 50) as u32, 1, 1);
-    }
-
     let cmd_buf = encoder.finish();
 
     println!("Submitting");
     queue.submit(&[cmd_buf]);
     println!("Done");
 
-    // Read buffer
+    for frame in 0..1000i32 {
+        println!("Doing frame {:?}", frame);
 
-    {
-        let mapped_fut = vel_x.map_read(0, BUFFER_SIZE);
-        device.poll(wgpu::Maintain::Wait);
-        let mapped_mem = mapped_fut.await.map_err(|_| "mapping failed")?;
-        let conts = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
+        let mut encoder = device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: None,
+            }
+        );
 
-        println!("vx = {:?} ... {:?}", &conts[..12], &conts[conts.len() - 12..]);
+
+        {
+            let mut pass = encoder.begin_compute_pass();
+            pass.set_pipeline(&possion_compute_pipeline);
+            pass.set_bind_group(
+                0,
+                &bind_group,
+                &[],
+            );
+
+            pass.dispatch((WIDTH * HEIGHT / DISPATCH_SIZE) as u32, 1, 1);
+        }
+
+        for i in 0..200 {
+            let mut pass = encoder.begin_compute_pass();
+            pass.set_pipeline(&step_possion_pipeline);
+            pass.set_bind_group(
+                0,
+                &bind_group,
+                &[],
+            );
+
+            pass.dispatch((WIDTH * HEIGHT / DISPATCH_SIZE) as u32, 1, 1);
+        }
+
+        {
+            let mut pass = encoder.begin_compute_pass();
+            pass.set_pipeline(&v_pipeline);
+            pass.set_bind_group(
+                0,
+                &bind_group,
+                &[],
+            );
+
+            pass.dispatch((WIDTH * HEIGHT / DISPATCH_SIZE) as u32, 1, 1);
+
+        }
+
+        let cmd_buf = encoder.finish();
+
+        println!("Submitting");
+        queue.submit(&[cmd_buf]);
+        println!("Done");
+
+        // // Read buffer
+        // println!("vx:");
+        // read_buffer(&device, &vel_x).await?;
+        // println!("vy:");
+        // read_buffer(&device, &vel_y).await?;
+
+        // println!("\npossion rhs:");
+        // read_buffer(&device, &tmp_pressure_poisson_rhs).await?;
+
+        if frame % 25 == 0 {
+            write_image(
+                &device,
+                (Some(&vel_x), Some(&vel_y), None),
+                &format!("velocity-res-{}", frame),
+            ).await?;
+        }
     }
 
-    {
-        let mapped_fut = vel_y.map_read(0, BUFFER_SIZE);
-        device.poll(wgpu::Maintain::Wait);
-        let mapped_mem = mapped_fut.await.map_err(|_| "mapping failed")?;
-        let conts = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
-
-        println!("vy = {:?} ... {:?}", &conts[..12], &conts[conts.len() - 12..]);
-    }
-
-    {
-        let mapped_fut = tmp_pressure_poisson_rhs.map_read(0, BUFFER_SIZE);
-        device.poll(wgpu::Maintain::Wait);
-        let mapped_mem = mapped_fut.await.map_err(|_| "mapping failed")?;
-        let conts = bytemuck::cast_slice::<u8, f32>(mapped_mem.as_slice());
-
-        println!("rhs = {:?} ... {:?}", &conts[..12], &conts[conts.len() - 12..]);
-    }
-
-
-    write_image(
-        &device,
-        (Some(&vel_x), Some(&vel_y), None),
-        "velocity",
-    ).await?;
-
-
-    write_image(
-        &device,
-        (Some(&tmp_pressure_poisson_rhs), None, None),
-        "tmp_pressure_poisson_rhs",
-    ).await?;
+    println!("bye");
 
     Ok(())
 }

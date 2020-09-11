@@ -2,18 +2,6 @@
 
 #include"prelude.comp"
 
-float vx(int x, int y) {
-    uint rx = (x + WIDTH) % WIDTH;
-    uint ry = (y + HEIGHT) % HEIGHT;
-    return vx_arr[rx + WIDTH * ry];
-}
-
-float vy(int x, int y) {
-    uint rx = (x + WIDTH) % WIDTH;
-    uint ry = (y + HEIGHT) % HEIGHT;
-    return vy_arr[rx + WIDTH * ry];
-}
-
 DECLARE(p1, NABLA_VECTORFIELD(vx, vy, x, y) / dt)
 
 DECLARE(p2_nx, XNABLA_TRIPLET(vx, vy, x, y))
@@ -34,4 +22,5 @@ void main() {
     int y = int(i / WIDTH);
 
     pressure_possion_rhs[i] = result(x, y);
+    pressure[i] = 0;
 }

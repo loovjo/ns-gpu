@@ -1,17 +1,17 @@
 layout(local_size_x = 50, local_size_y = 1, local_size_z = 1) in;
 
-#define DECLARE(name, expr) float name(int x, int y) { return expr; }
+#define DECLARE(name, expr) float name(int x, int y) { return (expr); }
 
 #define DF_DX(fn, x, y) ((fn((x) + 1, (y)) - fn((x) - 1, (y))) / (2 * dx))
 #define DF_DY(fn, x, y) ((fn((x), (y) + 1) - fn((x), (y) - 1)) / (2 * dy))
 
-#define NABLA_VECTORFIELD(fnx, fny, x, y) DF_DX(fnx, x, y) + DF_DY(fny, x, y)
+#define NABLA_VECTORFIELD(fnx, fny, x, y) (DF_DX(fnx, x, y) + DF_DY(fny, x, y))
 
 #define XNABLA_SCALARFIELD(fn, x, y) DF_DX(fn, x, y)
 #define YNABLA_SCALARFIELD(fn, x, y) DF_DY(fn, x, y)
 
-#define XNABLA_TRIPLET(fnx, fny, x, y) fnx(x, y) * DF_DX(fnx, x, y) + fny(x, y) * DF_DY(fnx, x, y)
-#define YNABLA_TRIPLET(fnx, fny, x, y) fnx(x, y) * DF_DX(fny, x, y) + fny(x, y) * DF_DY(fny, x, y)
+#define XNABLA_TRIPLET(fnx, fny, x, y) (fnx(x, y) * DF_DX(fnx, x, y) + fny(x, y) * DF_DY(fnx, x, y))
+#define YNABLA_TRIPLET(fnx, fny, x, y) (fnx(x, y) * DF_DX(fny, x, y) + fny(x, y) * DF_DY(fny, x, y))
 
 layout(set=0, binding=0) buffer Pressure {
     float[] pressure;
@@ -29,11 +29,36 @@ layout(set=0, binding=3) buffer VelocityY {
     float[] vy_arr;
 };
 
-uint WIDTH = 100;
-uint HEIGHT = 100;
+uint WIDTH  = 500;
+uint HEIGHT = 500;
 float dx = 0.01;
 float dy = 0.01;
 float dt = 0.0005;
 
 float rho = 1.0;
 float nu = 0.1;
+
+float vx(int x, int y) {
+    uint rx = (x + WIDTH) % WIDTH;
+    uint ry = (y + HEIGHT) % HEIGHT;
+    return vx_arr[rx + WIDTH * ry];
+}
+
+float vy(int x, int y) {
+    uint rx = (x + WIDTH) % WIDTH;
+    uint ry = (y + HEIGHT) % HEIGHT;
+    return vy_arr[rx + WIDTH * ry];
+}
+
+float p(int x, int y) {
+    uint rx = (x + WIDTH) % WIDTH;
+    uint ry = (y + HEIGHT) % HEIGHT;
+    return pressure[rx + WIDTH * ry];
+}
+
+float p_rhs(int x, int y) {
+    uint rx = (x + WIDTH) % WIDTH;
+    uint ry = (y + HEIGHT) % HEIGHT;
+    return pressure_possion_rhs[rx + WIDTH * ry];
+}
+
