@@ -296,7 +296,7 @@ async fn run() -> Result<(), String> {
         if frame % 25 == 0 {
             write_image(
                 &device,
-                (Some(&vel_x), Some(&vel_y), None),
+                (Some(&vel_x), Some(&vel_y), Some(&pressure)),
                 &format!("velocity-res-{}", frame),
             ).await?;
         }
