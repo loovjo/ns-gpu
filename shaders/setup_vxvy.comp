@@ -17,7 +17,7 @@ void main() {
     // vx_arr[i] = sin(fx * TAU) + cos(2 * fy * TAU);
     // vy_arr[i] = 2 * cos(fx * TAU) + cos(3 * fy * TAU);
     if (1.5 < fx && fx < 3.5 && 1.5 < fy && fy < 3.5) {
-        vx_arr[i] = -(fx - 2.5);
+        vx_arr[i] = 1;
         vy_arr[i] = -(fy - 2.5);
     }
 }
